@@ -12,55 +12,73 @@ This project consists of a web application that is based on RUSA's online calcul
 
 We are essentially replacing the calculator here [https://rusa.org/octime_acp.html](https://rusa.org/octime_acp.html). We can also use that calculator to clarify requirements and develop test data. 
 
-## Tasks
+## Implementation
 
-* Implement the logic in `acp_times.py` based on the algorithm linked above.
+### flask_brevets.py
 
-* Create test cases using the original website, and write test suites for your project.
-	* Based on what was discussed in the lecture, create test cases, try them in the original website, and check if your functions correctly calculate the times.
-	* This will effectively replicate the calulator above.
+This module contains our web framework `flask` which we use to listen and receive user-input responses from the front-end (the website) to the back_end where it is run through our algorithm. Initially the file contained the logic to only make a`GET request` when the user inputted/adjusted the km distance for each checkpoint in our race. To solve this issue, following the similar design pattern, two arguments were created: `
+* `time_and_date: (the begining start time to our race)` 
+* `brevet_distance: (the total amount of distance(km) of the race)` 
 
-* Edit the template and Flask app so that the required remaining arugments are passed along.
-	* Currently the miles to kilometers (and some other basic stuff) is implemented with AJAX. 
-	* The remainder is left to you.
+Using the `arrow` library which allows us to create a date/time object, I was able to instantiate an arrow object which modified our `time_and_date` argument in the format of `"YYYY-MM-DDTHH:mm"`. This was then sent to acp_times along with the other two arguements `km` and `brevet_distance` for our algorithm to interact with those User inputed features on the website. After this it was then loaded into a JSON object that our JQUERY would be able to accept and send output to our client side of our web server in `calc.html`. 
 
-* As always, revise the README file, and add your info to `Dockerfile`. These have points!
-	* **NOTE:** This time, you should outline the application, the algorithm, and how to use start (docker instructions, web app instructions). **Make sure you're thorough, otherwise you may not get all the points.**
+### calc.html
 
-* As always, submit your `credentials.ini` through Canvas. It should contain your name and git repo URL.
+The AJAX logic was already implemented which allowed our JQuery to implement the functionality for when a km checkpoint was manipulated by the User on the client side. My implementation followed this pattern by creating two varibles that accessed the specific id's for the start time of our interval and the total brevet distance. Once that was found I passed those arguements into our `Ajax` method `$.getJSON` which is used to get the JSON object we passed early and load the results. The variables created in calc.html were used as the values while the keys instantiated in our GET request argument `request.args.get` in `flask_brevets.py` 
+were used as the keys. This allowed us to now communicate from end-to-end based on our User's input from the website.
+
+### acp_times.py
+
+#### Background
+
+In order to generate the correct calculations for the opening and closing time of our brevet checkpoints, the following criteria was taken into consideration from the descritiption of the algorithm which can be found in the website link in the above section `acp_control_times`.
+
+#### Algorithm
+
+Following the logic described from the website I created a data structure which contained a dictionary of tuples. Our Key in this dictionary would be our interval distance, which as explained in the website is shown to have varying min/max speeds depending on which threshold is traversed in our total brevet distance; while our value would be that specific intervals max/min speed our racers can go for that specific interval distance. To calcaute the necerssay time I would do the following procedure:
+* Create an accumulator `total_time` that we can later convert to hours and minutes based upon the sum of the intervals it traversed
+
+* Create a remainder variable `remaining_distance` that will track the leftover distance.
+  * This case occurs when for instance, in a 400km brevet race, we have a checkpoint at 650km. According to the website criteria, to calculate its opening time we would say `200/34 + 200/32 + 200/30 + 50/28` with the divisor being the max time of those specific intervals. This would also be the case for closing time but the divisor being replaced with the minimum speed values. As you may notice, 650 does not divide evenly between each of our interval starting points `(0,200,400,600,1000)` so that leftover distance is automatically divided by the next intervals min/max speed values after the previous interval finishes. Thus, 50 in this case our remainder would be incorporated into the 600-1000 intervals max/min speed rather then the 400-600 max/min speed making it a remainder.
+
+* Iterate through the dictionary of tuples
+* Instantiate the min/max to their proper amount depending on if we are calculating the closed time (min) or open time (max)
+#### 1st Case:
+* If the km distance of the checkpoint minus the interval starting point is a positive integer, we can divide 200/(max or min) speed depending on which time and add it to our accumulator.
+  * Having our numerator set to 200 for this check takes care of the sums from the first 3 out of 4 intervals `0-200, 200-400, 400-600` since all of them are a distance of 200 exactly.
+#### 2nd Case:
+* If that case fails check for the edge case in which our checkpoint distance is in between the range of our first interval `0-200`
+  * In this case our checkpoint distance `km` can be the numerator, and we will divide it by the min or max speed of the first interval and add it to our accumulator. Once this is done we can break from our iteration since the total time would be fully accumulated and ready for conversion.
+#### 3rd Case:
+* Finally, if the previous cases fail we check if our remaining distance is between 1 and 400 since that range covers for all the potential remaining distances we want to calculate. As explained above we will divide the remaining distance by the next interval.
+  * Setting the range to 400 solves the case in which our checkpoint distance is 1000 km. On the 4th iteration, 1000 being our subtractor from our checkpoint will fail the first two cases. We can then assume that its remaining distance will be 400 which we will then be able to divide by the `600-1000` max or min speed and then add it to our accumulator.
+#### Conclusion:
+* After each case is checked, we instantiate `remaining_distance` to be our checkpoint distance minus our interval.
+  * `Note:` This variable will be repeatedly overwritten through each iteration. The value stored in it will only be used when the check_point distance fails the first two cases. The remaining distance from our previous interation will thus be our true remaining distance to calculate.
+
+* Once our interation is finished, we will convert our accumulated sum of all the intervals `total_time` to minutes and hours
+  * To convert to hours, we take the floor of `total_time` to get the integer of our accumulated sum
+  * To convert to minutes, we extract the decimal part of `total_time` and multiply it by 60 since in our integer is originally scaled to hours. We then round it to the nearest minute
+* Using the `shift` method from the `arrow` library, we modify are passed in arrow object `brevet_start_time` which stores our original start time and shift by the amount of hours and minutes we calculated based on the steps above. Returning this object gives us our intended opening and closing time.
+#### Edge Cases
+
+#### Open Time
+* When calculating our opening time, if our checkpoint distance is 0, we can assume that is the starting point, so we just return our original starting time which is stored in `brevet_start_time`
+* If our checkpoint distance exceeds the total length of the brevet race, we assume that it will have the same start time to the total distance of the race
+  * `For example: 450km checkpoint start_time == 400km total_brevet_distance start_time`
+
+#### Close Time
+* Please refer to Oddities section in the link [https://rusa.org/pages/acp-brevet-control-times-calculator#:~:text=The%20algorithm%20used,used%20outside%20France]  to see how closing time is calculated for check points between 0 and 60.
+* If our checkpoint distance exceeds the length or is equal to the brevet time we use the exact end time calculations given in the following link to calculate the closing times [https://en.wikipedia.org/wiki/Randonneuring#Time_limits:~:text=specific%20Super%20Randonneur.-,Time%20limits,-%5Bedit%5D]
+  * Implementing this case, I used a double hash map data structures (Dictionary of Dictionaries). The initially keys to the main dictionary are the total brevet distances. Our nested dictionary then contains a `"max_time"` key and a value which is the integer/float representation of how long the race should last scaled to hours. This allowed me to consistently access the nested dictionary pair based on which checkpoint distance corresponded to the key.
+  From their I could immediately use the nested key to get the total duration value and then modify it to correctly shift by the corresponding minutes and hours (refer to `conclusion` section above to see more details on conversion)
 
 ### Testing
 
-A suite of nose test cases is a requirement of this project. Design the test cases based on an interpretation of rules here [https://rusa.org/pages/acp-brevet-control-times-calculator](https://rusa.org/pages/acp-brevet-control-times-calculator). Be sure to test your test cases: You can use the current brevet time calculator [https://rusa.org/octime_acp.html](https://rusa.org/octime_acp.html) to check that your expected test outputs are correct. While checking these values once is a manual operation, re-running your test cases should be automated in the usual manner as a Nose test suite.
+A suite of nose test cases is a requirement of this project. Design of the test cases are based on an interpretation of rules here [https://rusa.org/pages/acp-brevet-control-times-calculator](https://rusa.org/pages/acp-brevet-control-times-calculator). Use of the official brevet time calculator [https://rusa.org/octime_acp.html](https://rusa.org/octime_acp.html) was used to increase validity.
+See more details in the `README.md` documentation in the test directory.
 
-To make automated testing more practical, your open and close time calculations should be in a separate module. Because I want to be able to use my test suite as well as yours, I will require that module be named `acp_times.py` and contain the two functions I have included in the skeleton code (though revised, of course, to return correct results).
 
-We should be able to run your test suite by changing to the `brevets` directory and typing `nosetests`. All tests should pass. You should have at least 5 test cases, and more importantly, your test cases should be chosen to distinguish between an implementation that correctly interprets the ACP rules and one that does not.
+## Author
 
-## Grading Rubric
-
-* If your code works as expected: 100 points. This includes:
-
-	* Completing the frontend in `calc.html`.
-	
-	* Completing the Flask app accordingly (`flask_brevets.py`).
-	
-	* Implementing the logic in `acp_times.py`.
-	
-	* Updating `README` with a clear specification.
-	
-	* Writing at least **five** correct tests using nose (put them in `tests`, follow Project 3 if necessary) and all pass.
-
-* If the algorithm is incorrect, 25 points will be docked off.
-
-* If the webpage does not work as expected (JQuery or Flask failing to correctly fill in the information, etc.), 25 points will be docked off.
-
-* If the test cases are missing/not functional/do not all pass, 5 points will be docked off per each (25 points total).
-
-* If `README` is not clear, missing or not edited, or `Dockerfile` is not updated, up to 15 points will be docked off.
-
-* If none of the functionalities work, 10 points will be given assuming `credentials.ini` is submitted with the correct repo URL, and `Dockerfile` builds and runs without any errors. 
-
-## Authors
-
-Michal Young, Ram Durairajan. Updated by Ali Hassani.
+Fedi Aniefuna
