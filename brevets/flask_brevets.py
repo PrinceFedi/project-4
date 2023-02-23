@@ -4,19 +4,21 @@ Replacement for RUSA ACP brevet time calculator
 
 """
 
+import logging
+
+import arrow  # Replacement for datetime, based on moment.js
 import flask
 from flask import request
-import arrow  # Replacement for datetime, based on moment.js
+
 import acp_times  # Brevet time calculations
 import config
-
-import logging
 
 ###
 # Globals
 ###
 app = flask.Flask(__name__)
 CONFIG = config.configuration()
+
 
 ###
 # Pages
@@ -51,14 +53,14 @@ def _calc_times():
     """
     app.logger.debug("Got a JSON request")
     km = request.args.get('km', 999, type=float)
+    time_and_date = request.args.get("time_and_date", type=str)
+    brevet_distance = request.args.get("distance", 998, type=float)
     app.logger.debug("km={}".format(km))
     app.logger.debug("request.args: {}".format(request.args))
-    # FIXME!
-    # Right now, only the current time is passed as the start time
-    # and control distance is fixed to 200
-    # You should get these from the webpage!
-    open_time = acp_times.open_time(km, 200, arrow.now().isoformat).format('YYYY-MM-DDTHH:mm')
-    close_time = acp_times.close_time(km, 200, arrow.now().isoformat).format('YYYY-MM-DDTHH:mm')
+
+    arrow_str = arrow.get(time_and_date, "YYYY-MM-DDTHH:mm")
+    open_time = acp_times.open_time(km, brevet_distance, arrow_str).format("YYYY-MM-DDTHH:mm")
+    close_time = acp_times.close_time(km, brevet_distance, arrow_str).format("YYYY-MM-DDTHH:mm")
     result = {"open": open_time, "close": close_time}
     return flask.jsonify(result=result)
 
